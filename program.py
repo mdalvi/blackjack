@@ -1,12 +1,12 @@
+# Used for card shuffle
 import random
 
 
 class Table(object):
-    def __init__(self, table_rules, dealer):
+    def __init__(self, table_rules):
         self.active_players = 0
         self.rules = table_rules
-        self.dealer = dealer
-        self.dealer.hits_soft_17 = self.rules.dealer_hits_soft_17
+        self.dealer = Dealer(name='Mike', hits_soft_17=self.rules.dealer_hits_soft_17)
         self.shoe_maker = ShoeMaker(self.rules.cut_card_at)
         self.shoe = self.shoe_maker.get_shoe(number_of_decks=self.rules.number_of_decks)
         self.seats = []
@@ -19,22 +19,11 @@ class Table(object):
             if self.active_players == 0:
                 print('No active players at table!')
                 break
-
             # Fill the shoe if the number of cards remaining are less than cut card marker
             if len(self.shoe) <= self.shoe.cut_card_at:
                 self.shoe = self.shoe_maker.get_shoe(number_of_decks=self.rules.number_of_decks)
 
-            self.place_your_bets(min_bet=self.rules.min_bet, max_bet=self.rules.max_bet)
-            self.dealer.no_more_bets()
-            self.dealer.deal(shoe=self.shoe, seats=self.seats)
-
-    def place_your_bets(self, min_bet, max_bet):
-        for seat in self.seats:
-            if seat.player is not None:
-                seat.set_bet(seat.player.place_bets(self.rules.min_bet, self.rules.max_bet))
-            else:
-                # Seat is empty
-                pass
+            self.dealer.deal(shoe=self.shoe, seats=self.seats, min_bet=self.rules.min_bet, max_bet=self.rules.max_bet)
 
     def join(self, player):
         if player.bankroll < self.rules.min_bet:
@@ -52,16 +41,26 @@ class Table(object):
 
 
 class Dealer(object):
-    def __init__(self, name):
+    def __init__(self, name, hits_soft_17):
         self.name = name
         self.cards = []
         self.actions = {'H': 'Hit!', 'S': 'Stand', 'DD': 'DoubleDown', 'SP': 'Split!'}
-        self.hits_soft_17 = False
+        self.hits_soft_17 = hits_soft_17
+
+    def place_your_bets(self, seats, min_bet, max_bet):
+        for seat in seats:
+            if seat.player is not None:
+                seat.set_bet(seat.player.place_bets(min_bet=min_bet, max_bet=max_bet))
+            else:
+                # Seat is empty
+                pass
 
     def no_more_bets(self):
         print('{name}: No more bets.'.format(name=self.name))
 
-    def deal(self, shoe, seats):
+    def deal(self, shoe, seats, min_bet, max_bet):
+        self.place_your_bets(seats=seats, min_bet=min_bet, max_bet=max_bet)
+        self.no_more_bets()
         print('{name}: Dealing cards...'.format(name=self.name))
 
         # First deal
@@ -71,9 +70,16 @@ class Dealer(object):
         # Dealer self-deals
         self.self_deal(card1=shoe.get_card_at_random(), card2=shoe.get_card_at_random())
 
+        # Checking Blackjack
+        for seat in seats:
+            if seat.player is not None and seat.get_hand_values()[0] == 21:
+                seat.set_reward(seat.bet * 2.50)
+                seat.status = 'blackjack'
+                print('{dealer}: {name} got Blackjack!'.format(dealer=self.name, name=seat.player.name))
+
         # Dealer serving every seat
         for seat in seats:
-            if seat.player is not None:
+            if seat.player is not None and seat.status == 'default':
                 while True:
                     action = seat.player.decide(seat.bet)
                     print(
@@ -82,40 +88,58 @@ class Dealer(object):
                         break
                     elif action == 'H':
                         seat.set_cards(card1=shoe.get_card_at_random())
-                        hand_value = seat.get_hand_value()
-                        if hand_value > 21:
+                        hand_values = seat.get_hand_values()
+                        if hand_values[0] > 21:
                             seat.discard_hand()
                             print('{dealer}: {name} busted!'.format(dealer=self.name, name=seat.player.name))
                             break
                     elif action == 'DD':
                         seat.set_bet(seat.bet)
                         seat.set_cards(card1=shoe.get_card_at_random())
-                        hand_value = seat.get_hand_value()
-                        if hand_value > 21:
+                        hand_values = seat.get_hand_values()
+                        if hand_values[0] > 21:
                             seat.discard_hand()
                             print('{dealer}: {name} busted!'.format(dealer=self.name, name=seat.player.name))
                             break
+                        break
                     elif action == 'SP':
-                        pass
+                        print('Currently splits are not allowed!')
 
         # Dealer plays
         is_dealer_busted = False
         print('Dealer has ' + self.get_hand_as_string(True))
-        while True:
-			hand_values = self.get_hand_values()
-			if hand_values[0] < 17:
-				self.self_deal(card1=shoe.get_card_at_random(), card2=None, true_hand=True)
-			elif hand_values[0] == 17 and hand_values[1] == 'soft' and self.hits_soft_17:
-				self.self_deal(card1=shoe.get_card_at_random(), card2=None, true_hand=True)
-			elif hand_values[0] >= 17 and hand_values[0] < 22:
-				break
-			elif hand_values[0] > 21:
-				is_dealer_busted = True
-                print('Dealer busted!')
+
+        # Check if all players are busted
+        all_busted = True
+        for seat in seats:
+            if seat.player is not None and seat.status == 'default':
+                all_busted = False
                 break
-			print('Dealer has ' + self.get_hand_as_string(True))
-        # Reward distribution (if any)
-        self.deal_rewards(seats=seats, is_dealer_busted=is_dealer_busted)
+
+        if not all_busted:
+            while True:
+                hand_values = self.get_hand_values()
+                if hand_values[0] < 17:
+                    self.self_deal(card1=shoe.get_card_at_random(), card2=None, true_hand=True)
+                elif hand_values[0] == 17 and hand_values[1] == 'soft' and self.hits_soft_17:
+                    self.self_deal(card1=shoe.get_card_at_random(), card2=None, true_hand=True)
+                elif hand_values[0] >= 17 and hand_values[0] < 22:
+                    break
+                elif hand_values[0] > 21:
+                    is_dealer_busted = True
+                    print('Dealer busted!')
+                    break
+                print('Dealer has ' + self.get_hand_as_string(True))
+            # Reward distribution (if any)
+            self.deal_rewards(seats=seats, is_dealer_busted=is_dealer_busted)
+
+        # Reset seat for new deal
+        for seat in seats:
+            if seat.player is not None:
+                seat.reset()
+
+        # Reset self for new deal
+        self.reset()
 
     def deal_rewards(self, seats, is_dealer_busted):
         for seat in seats:
@@ -123,7 +147,18 @@ class Dealer(object):
                 if seat.player is not None and seat.status == 'default':
                     seat.set_reward(seat.bet * 2)
             else:
-                pass
+                if seat.player is not None and seat.status == 'default':
+                    seat_hand_values = seat.get_hand_values()
+                    dealer_hand_values = self.get_hand_values()
+                    if seat_hand_values[0] < dealer_hand_values[0]:
+                        # Lost
+                        seat.set_reward(0)
+                    elif seat_hand_values[0] == dealer_hand_values[0]:
+                        # Bet push
+                        seat.set_reward(seat.bet)
+                    elif seat_hand_values[0] > dealer_hand_values[0]:
+                        # Won
+                        seat.set_reward(seat.bet * 2)
 
     def self_deal(self, card1, card2=None, true_hand=False):
         if card2 is not None:
@@ -156,7 +191,13 @@ class Dealer(object):
         for card in self.cards:
             hand_first_value += card.get_first_value()
             hand_second_value += card.get_second_value()
-        return hand_first_value,'hard' if hand_first_value <= 21 else hand_second_value,'soft'
+        if hand_first_value <= 21:
+            return hand_first_value, 'hard'
+        else:
+            return hand_second_value, 'soft'
+
+    def reset(self):
+        self.cards = []
 
 
 class Seat(object):
@@ -203,18 +244,26 @@ class Seat(object):
         hand_string += '{0}/{1}'.format(hand_first_value, hand_second_value)
         return hand_string
 
-    def get_hand_value(self):
+    def get_hand_values(self):
         hand_first_value = 0
         hand_second_value = 0
         for card in self.cards:
             hand_first_value += card.get_first_value()
             hand_second_value += card.get_second_value()
-        return hand_first_value if hand_first_value <= 21 else hand_second_value
+        if hand_first_value <= 21:
+            return hand_first_value, 'hard'
+        else:
+            return hand_second_value, 'soft'
 
     def discard_hand(self):
         self.bet = 0
         self.cards = []
-        self.status = 'lost'
+        self.status = 'busted'
+
+    def reset(self):
+        self.bet = 0
+        self.cards = []
+        self.status = 'default'
 
 
 class Shoe(object):
@@ -241,12 +290,11 @@ class Shoe(object):
 
 
 class TableRules(object):
-    def __init__(self, max_players, number_of_decks, dealer_hits_soft_17, dealer_peeks, min_bet, max_bet,
+    def __init__(self, max_players, number_of_decks, dealer_hits_soft_17, min_bet, max_bet,
                  cut_card_percent=25.0):
         self.max_players = max_players
         self.number_of_decks = number_of_decks
         self.dealer_hits_soft_17 = dealer_hits_soft_17
-        self.dealer_peeks = dealer_peeks
         self.min_bet = min_bet
         self.max_bet = max_bet
         self.cut_card_at = int(((number_of_decks * 52.0) * cut_card_percent) / 100.0)
@@ -274,9 +322,10 @@ class Human(Player):
         while True:
             try:
                 bet = int(
-                    input('{2} place your bet please.. (Min:{0}, Max:{1}) '.format(min_bet, max(self.bankroll, max_bet),
-                                                                                   self.name)))
-                if bet < min_bet or bet > max(self.bankroll, max_bet):
+                    input('{2} place your bet please.. (Min:{0}, Max:{1}, Bank:{3}) '.format(min_bet, min(self.bankroll,
+                                                                                                          max_bet),
+                                                                                             self.name, self.bankroll)))
+                if bet < min_bet or bet > min(self.bankroll, max_bet):
                     raise Exception
                 else:
                     break
@@ -369,12 +418,11 @@ class Face(object):
         self.second_value = second_value
 
 
-rules = TableRules(max_players=2, number_of_decks=6, dealer_hits_soft_17=True, dealer_peeks=True, min_bet=10,
-                   max_bet=100)
-dealer = Dealer(name='Mike')
-table = Table(table_rules=rules, dealer=dealer)
+rules = TableRules(max_players=3, number_of_decks=6, dealer_hits_soft_17=True, min_bet=2,
+                   max_bet=10)
+table = Table(table_rules=rules)
 alice = Human(name='Alice', bankroll=10000)
-micheal = Machine(name='Micheal', bankroll=5)
+micheal = Machine(name='Micheal', bankroll=1)
 bob = Machine(name='Bob', bankroll=500)
 eve = Machine(name='Eve', bankroll=100)
 table.join(alice)
