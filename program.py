@@ -82,16 +82,16 @@ class Dealer(object):
                         break
                     elif action == 'H':
                         seat.set_cards(card1=shoe.get_card_at_random())
-                        hand_values = seat.get_hand_values()
-                        if hand_values[0] > 21 and hand_values[1] > 21:
+                        hand_value = seat.get_hand_value()
+                        if hand_value > 21:
                             seat.discard_hand()
                             print('{dealer}: {name} busted!'.format(dealer=self.name, name=seat.player.name))
                             break
                     elif action == 'DD':
                         seat.set_bet(seat.bet)
                         seat.set_cards(card1=shoe.get_card_at_random())
-                        hand_values = seat.get_hand_values()
-                        if hand_values[0] > 21 and hand_values[1] > 21:
+                        hand_value = seat.get_hand_value()
+                        if hand_value > 21:
                             seat.discard_hand()
                             print('{dealer}: {name} busted!'.format(dealer=self.name, name=seat.player.name))
                             break
@@ -101,32 +101,19 @@ class Dealer(object):
         # Dealer plays
         is_dealer_busted = False
         print('Dealer has ' + self.get_hand_as_string(True))
-        # Playing hard hand first
         while True:
-            hand_values = self.get_hand_values()
-            if hand_values[0] < 17:
-                self.self_deal(card1=shoe.get_card_at_random(), card2=None, true_hand=True)
-            elif hand_values[0] >= 17 and hand_values[0] <= 21:
-                break
-            elif hand_values[0] > 21:
-                is_dealer_busted = True
+			hand_values = self.get_hand_values()
+			if hand_values[0] < 17:
+				self.self_deal(card1=shoe.get_card_at_random(), card2=None, true_hand=True)
+			elif hand_values[0] == 17 and hand_values[1] == 'soft' and self.hits_soft_17:
+				self.self_deal(card1=shoe.get_card_at_random(), card2=None, true_hand=True)
+			elif hand_values[0] >= 17 and hand_values[0] < 22:
+				break
+			elif hand_values[0] > 21:
+				is_dealer_busted = True
                 print('Dealer busted!')
                 break
-            print('Dealer has ' + self.get_hand_as_string(True))
-        hand_values = self.get_hand_values()
-        if hand_values[1] <= 17 and self.hits_soft_17:
-            # Playing soft hand second
-            while True:
-                hand_values = self.get_hand_values()
-                if hand_values[1] <= 17 and self.hits_soft_17:
-                    self.self_deal(card1=shoe.get_card_at_random(), card2=None, true_hand=True)
-                elif hand_values[1] >= 17 and hand_values[1] <= 21:
-                    break
-                elif hand_values[1] > 21:
-                    is_dealer_busted = True
-                    print('Dealer busted!')
-                    break
-                print('Dealer has ' + self.get_hand_as_string(True))
+			print('Dealer has ' + self.get_hand_as_string(True))
         # Reward distribution (if any)
         self.deal_rewards(seats=seats, is_dealer_busted=is_dealer_busted)
 
@@ -169,7 +156,7 @@ class Dealer(object):
         for card in self.cards:
             hand_first_value += card.get_first_value()
             hand_second_value += card.get_second_value()
-        return hand_first_value, hand_second_value
+        return hand_first_value,'hard' if hand_first_value <= 21 else hand_second_value,'soft'
 
 
 class Seat(object):
@@ -216,13 +203,13 @@ class Seat(object):
         hand_string += '{0}/{1}'.format(hand_first_value, hand_second_value)
         return hand_string
 
-    def get_hand_values(self):
+    def get_hand_value(self):
         hand_first_value = 0
         hand_second_value = 0
         for card in self.cards:
             hand_first_value += card.get_first_value()
             hand_second_value += card.get_second_value()
-        return hand_first_value, hand_second_value
+        return hand_first_value if hand_first_value <= 21 else hand_second_value
 
     def discard_hand(self):
         self.bet = 0
@@ -302,7 +289,6 @@ class Human(Player):
         while True:
             action = input('Choose your action (S|H|DD|SP) {name}: '.format(name=self.name)).upper()
             if action in self.actions:
-
                 if action == 'DD':
                     self.bankroll -= bet
                 return action
